@@ -3,6 +3,7 @@
 #include <chrono>
 #include <ctime>
 #include <fstream>
+#include <cstdlib>
 
 
 class TransportStream{
@@ -17,7 +18,8 @@ class TransportStream{
 		inputFile(String): The name of the input file
 		*/
 		TransportStream(std::string inputFile){
-			
+			//set input as intermediate file
+			this->input = "intermediate.ts"
 			//Create the output file name
 			//get file name no .ts
 			std::string substring = originalString.substr(0, input.length() - 3);
@@ -38,7 +40,7 @@ class TransportStream{
 			this->output = ouputFile;
 		}
 		
-		/*
+		/**
 		Getter for input
 		Parameters:
 		Null
@@ -49,7 +51,7 @@ class TransportStream{
 			return input;
 		}
 		
-		/*
+		/**
 		Getter for output
 		Parameters:
 		Null
@@ -60,11 +62,11 @@ class TransportStream{
 			return output;
 		}
 		
-		/*
+		/**
 		Function for processing multiple (or single) request on the file
 		*/
 		void processMultiple(){
-			//process one file here using intermediate.ts and output
+			//process one file here using input (intermediate.ts) and output
 			
 			
 			//choice to do more
@@ -88,7 +90,27 @@ class TransportStream{
 			}
 		}
 		
+		//XML EXTRACTION FUNCTIONS
+	
+		/**
+		Function to get the XML for the stream
+		Parameters:
+		Null
+		Outputs:
+		Null
+		*/
+		void getXML(){
+			std::string command = 'tsp -I file " + input + " -P psi -x "dataXML.xml" -d'
+			system(command);
+		}
+		
+		
+		
 	};	
+	
+	
+	
+	
 	
 		
 		
