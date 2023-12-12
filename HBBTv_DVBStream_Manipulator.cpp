@@ -87,9 +87,9 @@ class TransportStream{
 			//save_pat()
 
 			//Get the process number and pmtPID of the chosen service
-			//choices = serviceChoice()
-			//processNumber = choices[0]
-			//pmtPID = choices[1]
+			choices = serviceChoice()
+			processNumber = choices[0]
+			pmtPID = choices[1]
 
 			//process the file
 			processTSFile(processNumber, pmtPID);
@@ -125,12 +125,21 @@ class TransportStream{
 		*/
 		void processTSFile(int processNumber, int pmtPID) {
 			//Make the PMT XML for the process number 
-			//savePMTByService("pmtXML.xml", processNumber)
-			
+			savePMTByServiceID("pmtXML.xml", processNumber);
+
 			//Replace SCTE-35 with DSMCC
-			
+
 			//Get SCTE PID
-			//Check if SCTE PID not null
+			std::string sctePID = getSCTEPID();
+			if (!(sctePID == "")) {
+				//make int
+				int int_scte_pid = std::stoi(sctePID, nullptr, 16);
+			}
+			else {
+				std::cout << "SCTE PID not found, run on service with SCTE" << std::endl;
+			}
+
+		
 			//Replace null choice
 			std::cout << "\nReplace Null SCTE Packets?:" << std::endl;
 			std::cout << "0. No" << std::endl;
@@ -147,13 +156,13 @@ class TransportStream{
 				replace_scte35(input, "intermediate.ts", int_scte_pid, True)
 			}
 			//Replace SCTE elements with DSMCC ones
-			//replaceSCTEElement("pmtXML.xml", scte_pid)
+			replaceSCTEElement("pmtXML.xml", scte_pid)
 			//create new pmt
-			//replaceSCTEElement("pmtXML.xml", scte_pid)
 			//replace old pmt with new one
-			//replace_table("intermediate.ts", pmt_pid, "pmtXML.xml", output_file)
+			replace_table("intermediate.ts", pmt_pid, "pmtXML.xml", output_file)
 				
 			//add that DSMCC element to another service
+			/**
 			bool replaceChoice = true;
 			while (replaceChoice) {
 				std::cout << "\nAdd DSMCC Element to another service?:" << std::endl;
@@ -170,6 +179,7 @@ class TransportStream{
 				}
 
 			}
+			*/
 
 			
 
