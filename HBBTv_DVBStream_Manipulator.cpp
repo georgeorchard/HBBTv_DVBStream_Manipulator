@@ -12,6 +12,9 @@
 #include <cmath>
 #include <iomanip>
 #include <stdexcept>
+#include <iterator>
+#include <regex>
+
 
 
 
@@ -499,24 +502,264 @@ class TransportStream{
 		Function to get the XML for the stream
 		Parameters:
 		Null
-		Outputs:
+		Returns:
 		Null
 		*/
 		void getXML(){
-			std::string command = 'tsp -I file " + input + " -P psi -x "dataXML.xml" -d';
+			std::string command = 'tsp -I file ' + input + ' -P psi -x "dataXML.xml" -d';
 			system(command);
+		}
+
+		/**
+		Function to replace a component element in the PMT XML with a specified elementary_PID.
+    
+		Parameters:
+		xml_file (str): The file containing the XML for the PMT.
+		scte_pid (str): The hex PID for the component to be replaced.
+
+		Returns:
+		Null
+		*/
+		void replaceSCTEElement(const std::string& xml_file, const std::string& scte_pid) {
+			std::ifstream ifs(xml_file);
+			std::ostringstream oss;
+			oss << ifs.rdbuf();
+			std::string xml_content = oss.str();
+
+			size_t pos = xml_content.find("<PMT>");
+			if (pos != std::string::npos) {
+				size_t target_pos = xml_content.find("elementary_PID=\"" + scte_pid + "\"");
+				if (target_pos != std::string::npos) {
+					size_t start_pos = xml_content.rfind("<component", target_pos);
+					size_t end_pos = xml_content.find("</component>", target_pos) + 12;
+					std::string target_component = xml_content.substr(start_pos, end_pos - start_pos);
+
+					std::string new_component =
+						"<component elementary_PID=\"" + scte_pid + "\" stream_type=\"0x0C\">" +
+						"<stream_identifier_descriptor component_tag=\"0x09\"/>" +
+						"<data_stream_alignment_descriptor alignment_type=\"0x09\"/>" +
+						"</component>";
+
+					xml_content.replace(start_pos, end_pos - start_pos, new_component);
+				}
+				else {
+					std::cout << "Component with elementary_PID '" << scte_pid << "' not found in the XML." << std::endl;
+					return;
+				}
+			}
+			else {
+				std::cout << "PMT element not found in the XML." << std::endl;
+				return;
+			}
+
+			std::ofstream ofs(xml_file);
+			ofs << xml_content;
+		}
+
+
+		/**
+		Function to get the SCTE PID of a service given the PMT of that service
+
+		Parameters:
+		Null
+
+		Returns:
+		scte_pid(String): The SCTE PID
+		*/
+		std::string getSCTEPID() {
+			std::ifstream file("pmtXML.xml");
+			std::ostringstream oss;
+			oss << file.rdbuf();
+			std::string xml_content = oss.str();
+
+			size_t pmt_pos = xml_content.find("<PMT>");
+			if (pmt_pos != std::string::npos) {
+				size_t component_pos = xml_content.find("stream_type=\"0x86\"", pmt_pos);
+				if (component_pos != std::string::npos) {
+					size_t start_pos = xml_content.rfind("<component", component_pos);
+					size_t end_pos = xml_content.find("/>", component_pos) + 2;
+					std::string component_tag = xml_content.substr(start_pos, end_pos - start_pos);
+
+					size_t pid_pos = component_tag.find("elementary_PID=\"");
+					if (pid_pos != std::string::npos) {
+						pid_pos += 16; // Move to the start of the PID value
+						size_t pid_end_pos = component_tag.find("\"", pid_pos);
+						std::string elementary_pid = component_tag.substr(pid_pos, pid_end_pos - pid_pos);
+						return elementary_pid;
+					}
+				}
+			}
+
+			return "";
+		}
+
+
+		/**
+		Function to get the name of a service given the service ID
+
+		Parameters:
+		target_service_id(String): The service ID
+
+		Returns:
+		service_name(String): The name of the service
+		*/
+		std::string getServiceName(const std::string& target_service_id) {
+			std::ifstream file("dataXML.xml");
+			std::ostringstream oss;
+			oss << file.rdbuf();
+			std::string xml_content = oss.str();
+
+			std::regex sdt_regex("<SDT>.*?</SDT>");
+			std::sregex_iterator sdt_match(xml_content.begin(), xml_content.end(), sdt_regex);
+			std::sregex_iterator sdt_end;
+
+			for (; sdt_match != sdt_end; ++sdt_match) {
+				std::string sdt_text = sdt_match->str();
+				std::regex service_id_regex("service_id=\"([^\"]+)\"");
+				std::sregex_iterator service_id_match(sdt_text.begin(), sdt_text.end(), service_id_regex);
+				std::sregex_iterator service_id_end;
+
+				for (; service_id_match != service_id_end; ++service_id_match) {
+					std::string service_id = service_id_match->str(1);
+					if (service_id == target_service_id) {
+						std::regex service_name_regex("<service_descriptor service_name=\"([^\"]+)\"");
+						std::sregex_iterator service_name_match(sdt_text.begin(), sdt_text.end(), service_name_regex);
+						std::sregex_iterator service_name_end;
+
+						for (; service_name_match != service_name_end; ++service_name_match) {
+							std::string service_name = service_name_match->str(1);
+							return service_name;
+						}
+					}
+				}
+			}
+
+			return "";
+		}
+
+
+		/**
+		Function to save the PMT of a service given the service ID
+
+		Parameters:
+		xml_file (str): The path to the XML file.
+		service_id (str): The service ID to search for.
+
+		Returns:
+		Null
+		*/
+		void savePMTByServiceID(const std::string& xml_file, const std::string& service_id) {
+			std::ifstream file(xml_file);
+			std::ostringstream oss;
+			oss << file.rdbuf();
+			std::string xml_content = oss.str();
+
+			std::regex pmt_regex("<PMT(\\s+.*?)*?service_id=\"" + service_id + "\"(\\s+.*?)?>.*?</PMT>");
+			std::sregex_iterator pmt_match(xml_content.begin(), xml_content.end(), pmt_regex);
+			std::sregex_iterator pmt_end;
+
+			std::ostringstream new_xml;
+			new_xml << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<tsduck>\n";
+
+			for (; pmt_match != pmt_end; ++pmt_match) {
+				new_xml << pmt_match->str();
+			}
+
+			new_xml << "</tsduck>";
+
+			std::ofstream output_file(xml_file);
+			output_file << new_xml.str();
+		}
+
+
+		/**
+		Function to save the PAT tag to the same XML file.
+
+		Parameters:
+		None
+
+		Returns:
+		None
+		*/
+		void savePAT() {
+			std::ifstream file("dataXML.xml");
+			std::ostringstream oss;
+			oss << file.rdbuf();
+			std::string xml_content = oss.str();
+
+			std::regex pat_regex("<PAT(\\s+.*?)*?>(\\s+.*?)?</PAT>");
+			std::sregex_iterator pat_match(xml_content.begin(), xml_content.end(), pat_regex);
+			std::sregex_iterator pat_end;
+
+			std::ostringstream new_xml;
+			new_xml << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<tsduck>\n";
+
+			for (; pat_match != pat_end; ++pat_match) {
+				new_xml << pat_match->str();
+			}
+
+			new_xml << "</tsduck>";
+
+			std::ofstream output_file("patXML.xml");
+			output_file << new_xml.str();
+		}
+
+
+		/**
+		Function to choose from a list of services
+		
+		Parameters:
+		Null
+
+		Returns:
+		choices(String[]): Array containing serviceChoice, pmtChoice, serviceName
+		*/
+		std::vector<std::vector<std::string>> serviceChoice() {
+			std::ifstream file("patXML.xml");
+			std::ostringstream oss;
+			oss << file.rdbuf();
+			std::string xml_content = oss.str();
+
+			std::regex pat_regex("<PAT(\\s+.*?)*?>(\\s+.*?)?</PAT>");
+			std::sregex_iterator pat_match(xml_content.begin(), xml_content.end(), pat_regex);
+			std::sregex_iterator pat_end;
+
+			std::vector<std::vector<std::string>> servicesList;
+
+			for (; pat_match != pat_end; ++pat_match) {
+				std::string pat_info = pat_match->str();
+				std::regex service_regex("<service\\s+.*?service_id=\"(.*?)\"\\s+program_map_PID=\"(.*?)\"\\s+/>");
+				std::sregex_iterator service_match(pat_info.begin(), pat_info.end(), service_regex);
+				std::sregex_iterator service_end;
+
+				for (; service_match != service_end; ++service_match) {
+					std::vector<std::string> serviceDetails;
+					serviceDetails.push_back(service_match->str(1));
+					serviceDetails.push_back(service_match->str(2));
+					// Call get_service_name() and get service name here
+					servicesList.push_back(serviceDetails);
+				}
+			}
+
+			std::cout << "Services available:" << std::endl;
+			for (size_t index = 0; index < servicesList.size(); ++index) {
+				std::cout << "Index: " << index << ", Service ID: " << servicesList[index][0] << ", Program Map PID: " << servicesList[index][1] << std::endl;
+			}
+
+			int choice;
+			std::cout << "Enter the index of the service: ";
+			std::cin >> choice;
+
+			if (choice >= 0 && static_cast<size_t>(choice) < servicesList.size()) {
+				return { servicesList[choice] };
+			}
+
+			return {};
 		}
 		
 		/**Functions NEEDED(need xml parser)
-		* findPMTPID
-		* findAvailablePIDs
-		* replaceSCTEElement
 		* addDSMCCToService
-		* getSCTEPID
-		* getXML
-		* get_service_name
-		* save_pmt_by_service_id
-		* save_pat
+		
 		* serviceChoice
 		*/
 
