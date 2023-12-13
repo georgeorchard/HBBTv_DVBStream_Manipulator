@@ -35,7 +35,8 @@ class TransportStream{
 			this->input = "inputcopy.ts";
 			//Create the output file name
 			//get file name no .ts
-			std::string substring = input.substr(0, input.length() - 3);
+			std::string substring = inputFile.substr(0, (inputFile.length() - 3));
+			
 			// Get the current system time
 			auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
@@ -85,7 +86,7 @@ class TransportStream{
 			getXML();
 
 			//save the PAT of the XML of the input file in a seperate file
-			//save_pat()
+			savePAT();
 
 			//Get the process number and pmtPID of the chosen service
 			std::array<int,2> choices = serviceChoice();
@@ -126,21 +127,26 @@ class TransportStream{
 		*/
 		void processTSFile(int processNumber, int pmtPID) {
 			//Make the PMT XML for the process number 
-			savePMTByServiceID("pmtXML.xml", std::to_string(processNumber));
+			savePMTByServiceID("pmtXML.xml", intToHexString(processNumber));
 
 			//Replace SCTE-35 with DSMCC
 
 			//Get SCTE PID
-			int int_scte_pid = 0;
+			int int_scte_pid;
 			std::string sctePID = getSCTEPID();
+			//std::cout << sctePID;
+			
+			
 			if (!(sctePID == "")) {
 				//make int
 				int_scte_pid = std::stoi(sctePID, nullptr, 16);
 			}
 			else {
 				std::cout << "SCTE PID not found, run on service with SCTE" << std::endl;
+				exit(EXIT_SUCCESS);
 			}
 
+		
 		
 			//Replace null choice
 			std::cout << "\nReplace Null SCTE Packets?:" << std::endl;
@@ -201,7 +207,7 @@ class TransportStream{
 		*None
 		*/
 		void insert_table(std::string input_file ,int pid, std::string tablexml, int reprate_ms, std::string output_file) {
-			std::string command = "tsp - I file " + input_file + " - P inject - p " + (std::to_string(pid)) + tablexml + " = " + (std::to_string(reprate_ms)) + " - O file " + output_file;
+			std::string command = "tsp -I file " + input_file + " -P inject -p " + (std::to_string(pid)) + tablexml + " = " + (std::to_string(reprate_ms)) + " -O file " + output_file + " >NUL";
 			system(command.c_str());
 		}
 
@@ -216,7 +222,7 @@ class TransportStream{
 		*None
 		*/
 		void replace_table(std::string input_file, int pid, std::string tablexml, std::string output_file) {
-			std::string command = "tsp - I file " + input_file + " - P inject - p " + (std::to_string(pid)) + " - r " + tablexml + " - O file " + output_file;
+			std::string command = "tsp -I file " + input_file + " -P inject -p " + (std::to_string(pid)) + " -r " + tablexml + " -O file " + output_file+ " >NUL";
 			system(command.c_str());
 		}
 
@@ -547,6 +553,7 @@ class TransportStream{
 						output_stream.write(reinterpret_cast<char*>(dsmcc_packet.data()), dsmcc_packet.size());
 						version_count += 1;
 					}
+					//if current SCTE packet is null
 					else {
 						if (!replaceNull) {
 							events_notreplaced += 1;
@@ -587,7 +594,7 @@ class TransportStream{
 		Null
 		*/
 		void getXML(){
-			std::string command = "tsp - I file " + input + " - P psi - x " + '"' + "dataXML.xml" +'"' + "- d";
+			std::string command = "tsp -I file " + input +  " -P psi -x " + "dataXML.xml" + " -d" + " >NUL";
 			system(command.c_str());
 		}
 
@@ -602,39 +609,38 @@ class TransportStream{
 		Null
 		*/
 		void replaceSCTEElement(const std::string& xml_file, const std::string& scte_pid) {
-			std::ifstream ifs(xml_file);
-			std::ostringstream oss;
-			oss << ifs.rdbuf();
-			std::string xml_content = oss.str();
-
-			size_t pos = xml_content.find("<PMT>");
-			if (pos != std::string::npos) {
-				size_t target_pos = xml_content.find("elementary_PID=\"" + scte_pid + "\"");
-				if (target_pos != std::string::npos) {
-					size_t start_pos = xml_content.rfind("<component", target_pos);
-					size_t end_pos = xml_content.find("</component>", target_pos) + 12;
-					std::string target_component = xml_content.substr(start_pos, end_pos - start_pos);
-
-					std::string new_component =
-						"<component elementary_PID=\"" + scte_pid + "\" stream_type=\"0x0C\">" +
-						"<stream_identifier_descriptor component_tag=\"0x09\"/>" +
-						"<data_stream_alignment_descriptor alignment_type=\"0x09\"/>" +
-						"</component>";
-
-					xml_content.replace(start_pos, end_pos - start_pos, new_component);
-				}
-				else {
-					std::cout << "Component with elementary_PID '" << scte_pid << "' not found in the XML." << std::endl;
-					return;
-				}
-			}
-			else {
-				std::cout << "PMT element not found in the XML." << std::endl;
+			// Read the content of the XML file
+			std::ifstream file(xml_file);
+			if (!file.is_open()) {
+				std::cerr << "Error opening file." << std::endl;
 				return;
 			}
 
-			std::ofstream ofs(xml_file);
-			ofs << xml_content;
+			std::ostringstream oss;
+			oss << file.rdbuf();
+			std::string xml_content = oss.str();
+
+			// Define the new component to be inserted
+			std::string new_component =
+				"<component elementary_PID=\"" + scte_pid + "\" stream_type=\"0x0C\">" +
+				"<stream_identifier_descriptor component_tag=\"0x09\"/>" +
+				"<data_stream_alignment_descriptor alignment_type=\"0x09\"/>" +
+				"</component>";
+
+			// Define the regular expression to find and replace the component
+			std::regex component_regex("<component elementary_PID=\"" + scte_pid + "\" stream_type=\"0x86\"[\\s\\S]*?</component>");
+
+			// Replace the matched content with the new component
+			std::string replaced_content = std::regex_replace(xml_content, component_regex, new_component);
+
+			// Save the modified content back to the file
+			std::ofstream output_file(xml_file);
+			if (output_file.is_open()) {
+				output_file << replaced_content;
+				output_file.close();
+			} else {
+				std::cerr << "Error opening file for writing." << std::endl;
+			}
 		}
 
 
@@ -653,25 +659,17 @@ class TransportStream{
 			oss << file.rdbuf();
 			std::string xml_content = oss.str();
 
-			size_t pmt_pos = xml_content.find("<PMT>");
-			if (pmt_pos != std::string::npos) {
-				size_t component_pos = xml_content.find("stream_type=\"0x86\"", pmt_pos);
-				if (component_pos != std::string::npos) {
-					size_t start_pos = xml_content.rfind("<component", component_pos);
-					size_t end_pos = xml_content.find("/>", component_pos) + 2;
-					std::string component_tag = xml_content.substr(start_pos, end_pos - start_pos);
+			std::regex component_regex("<component elementary_PID=\"(.*?)\" stream_type=\"0x86\"[\\s\\S]*?</component>");
+			std::sregex_iterator component_match(xml_content.begin(), xml_content.end(), component_regex);
+			std::sregex_iterator component_end;
 
-					size_t pid_pos = component_tag.find("elementary_PID=\"");
-					if (pid_pos != std::string::npos) {
-						pid_pos += 16; // Move to the start of the PID value
-						size_t pid_end_pos = component_tag.find("\"", pid_pos);
-						std::string elementary_pid = component_tag.substr(pid_pos, pid_end_pos - pid_pos);
-						return elementary_pid;
-					}
-				}
+			//std::vector<std::pair<int, int>> servicesList;
+
+			for (; component_match != component_end; ++component_match) {
+				int sctePID = std::stoi(component_match->str(1), nullptr, 0); 
+				std::string sctePIDHex = intToHexString(sctePID);
+				return sctePIDHex;
 			}
-
-			return "";
 		}
 
 
@@ -684,39 +682,45 @@ class TransportStream{
 		Returns:
 		service_name(String): The name of the service
 		*/
+
 		std::string getServiceName(const std::string& target_service_id) {
+			//std::cout << "\nTarget: " + target_service_id;
 			std::ifstream file("dataXML.xml");
 			std::ostringstream oss;
 			oss << file.rdbuf();
 			std::string xml_content = oss.str();
 
-			std::regex sdt_regex("<SDT>.*?</SDT>");
+			std::regex sdt_regex("<SDT(\\s+.*?)*?>(\\s+.*?)?</SDT>");
 			std::sregex_iterator sdt_match(xml_content.begin(), xml_content.end(), sdt_regex);
 			std::sregex_iterator sdt_end;
 
 			for (; sdt_match != sdt_end; ++sdt_match) {
 				std::string sdt_text = sdt_match->str();
-				std::regex service_id_regex("service_id=\"([^\"]+)\"");
-				std::sregex_iterator service_id_match(sdt_text.begin(), sdt_text.end(), service_id_regex);
-				std::sregex_iterator service_id_end;
+				//std::cout << sdt_text;
 
-				for (; service_id_match != service_id_end; ++service_id_match) {
-					std::string service_id = service_id_match->str(1);
-					if (service_id == target_service_id) {
-						std::regex service_name_regex("<service_descriptor service_name=\"([^\"]+)\"");
-						std::sregex_iterator service_name_match(sdt_text.begin(), sdt_text.end(), service_name_regex);
-						std::sregex_iterator service_name_end;
+				//std::regex service_regex("<service service_id=\"" + target_service_id + "\".*?</service>");
+				std::regex service_regex("<service service_id=\"" + target_service_id + "\"[\\s\\S]*?</service>");
+				std::sregex_iterator service_match(sdt_text.begin(), sdt_text.end(), service_regex);
+				std::sregex_iterator service_end;
 
-						for (; service_name_match != service_name_end; ++service_name_match) {
-							std::string service_name = service_name_match->str(1);
-							return service_name;
-						}
+				for (; service_match != service_end; ++service_match) {
+					std::string service_info = service_match->str();
+					//std::cout << service_info;
+
+					std::regex service_desc_regex("<service_descriptor[^>]*service_name=\"([^\"]+)\"");
+					std::sregex_iterator service_desc_match(service_info.begin(), service_info.end(), service_desc_regex);
+					std::sregex_iterator service_desc_end;
+
+					for (; service_desc_match != service_desc_end; ++service_desc_match) {
+						std::string service_name = service_desc_match->str(1);
+						return service_name;
 					}
 				}
 			}
 
-			return "";
+			return ""; // Return empty string if service name is not found
 		}
+
 
 
 		/**
@@ -730,12 +734,13 @@ class TransportStream{
 		Null
 		*/
 		void savePMTByServiceID(const std::string& xml_file, const std::string& service_id) {
-			std::ifstream file(xml_file);
+			std::ifstream file("dataXML.xml");
 			std::ostringstream oss;
 			oss << file.rdbuf();
 			std::string xml_content = oss.str();
-
-			std::regex pmt_regex("<PMT(\\s+.*?)*?service_id=\"" + service_id + "\"(\\s+.*?)?>.*?</PMT>");
+			
+			std::regex pmt_regex("<PMT.*?service_id=\"" + service_id + "\"[\\s\\S]*?</PMT>");
+			//std::regex pmt_regex("<PMT(\\s+.*?)*?service_id=\"" + service_id + "\"(\\s+.*?)?>.*?</PMT>");
 			std::sregex_iterator pmt_match(xml_content.begin(), xml_content.end(), pmt_regex);
 			std::sregex_iterator pmt_end;
 
@@ -744,6 +749,8 @@ class TransportStream{
 
 			for (; pmt_match != pmt_end; ++pmt_match) {
 				new_xml << pmt_match->str();
+				//std::cout << pmt_match->str()<< std::endl;
+				
 			}
 
 			new_xml << "</tsduck>";
@@ -801,29 +808,24 @@ class TransportStream{
 			oss << file.rdbuf();
 			std::string xml_content = oss.str();
 
-			std::regex pat_regex("<PAT(\\s+.*?)*?>(\\s+.*?)?</PAT>");
+			std::regex pat_regex("<service\\s+service_id=\"(.*?)\"\\s+program_map_PID=\"(.*?)\"\\s*/>");
 			std::sregex_iterator pat_match(xml_content.begin(), xml_content.end(), pat_regex);
 			std::sregex_iterator pat_end;
 
-			std::vector<std::vector<int>> servicesList;
+			std::vector<std::pair<int, int>> servicesList;
 
 			for (; pat_match != pat_end; ++pat_match) {
-				std::string pat_info = pat_match->str();
-				std::regex service_regex("<service\\s+.*?service_id=\"(.*?)\"\\s+program_map_PID=\"(.*?)\"\\s+/>");
-				std::sregex_iterator service_match(pat_info.begin(), pat_info.end(), service_regex);
-				std::sregex_iterator service_end;
-
-				for (; service_match != service_end; ++service_match) {
-					std::vector<int> serviceDetails;
-					serviceDetails.push_back(std::stoi(service_match->str(1)));
-					serviceDetails.push_back(std::stoi(service_match->str(2)));
-					servicesList.push_back(serviceDetails);
-				}
+				int service_id = std::stoi(pat_match->str(1), nullptr, 0); // Convert hexadecimal string to integer
+				int program_map_pid = std::stoi(pat_match->str(2), nullptr, 0); // Convert hexadecimal string to integer
+				servicesList.push_back(std::make_pair(service_id, program_map_pid));
 			}
 
 			std::cout << "Services available:" << std::endl;
 			for (size_t index = 0; index < servicesList.size(); ++index) {
-				std::cout << "Index: " << index << ", Service ID: " << servicesList[index][0] << ", Program Map PID: " << servicesList[index][1] << std::endl;
+				//get name
+				std::string name = getServiceName(intToHexString(servicesList[index].first));
+				std::cout << "Index: " << index << ", Service ID: " << servicesList[index].first
+						  << ", Program Map PID: " << servicesList[index].second << ", Service Name: "<< name <<std::endl;
 			}
 
 			int choice;
@@ -831,23 +833,40 @@ class TransportStream{
 			std::cin >> choice;
 
 			if (choice >= 0 && static_cast<size_t>(choice) < servicesList.size()) {
-				return { servicesList[choice][0], servicesList[choice][1] };
+				
+				return { servicesList[choice].first, servicesList[choice].second };
 			}
 
 			return { -1, -1 }; // Return invalid values if choice is out of bounds
 		}
-
 		
-		/**Functions NEEDED(need xml parser)
-		* addDSMCCToService
+		/**
+		Function to convert int to hex
 		
-		* serviceChoice
+		Parameters:
+		int
+		
+		Returns:
+		hex
 		*/
+		
+		std::string intToHexString(int value) {
+			std::stringstream stream;
+			stream << "0x" << std::setfill('0') << std::setw(4) << std::hex << value;
+			return stream.str();
+		}
 
-		
-		
-	};	
-	
+				
+				/**Functions NEEDED(need xml parser)
+				* addDSMCCToService
+				
+				* serviceChoice
+				*/
+
+				
+				
+		};	
+			
 	
 	
 	
@@ -858,7 +877,7 @@ class TransportStream{
 		
 	int main(int argc, char* argv[]){
 		//get the file name from the command line
-		std::string input = argv[0];
+		std::string input = argv[1];
 		//Add .ts to end of file name if not there
 		if (input.length() >= 3 &&
 			input.substr(input.length() - 3) == ".ts") {
@@ -872,6 +891,7 @@ class TransportStream{
 			input = input + ".ts";
 		}
 		
+		
 		//copy the input file to an intermediate one
 		std::string sourceFileName = input; 
 		std::string destinationFileName = "inputcopy.ts"; 
@@ -881,10 +901,21 @@ class TransportStream{
 		sourceFile.close();
 		destinationFile.close();
 		
+	
+		
 		//create the transport stream object
 		TransportStream ts(input);
 		//call the process multiple
-		//ts.processMultiple()
+		ts.processMultiple();
+		//remove files
+		std::remove("intermediate.ts");
+		std::remove("inputcopy.ts");
+		/**
+		std::remove("dataXML.xml");
+		std::remove("patXML.xml");
+		std::remove("pmtXML.xml");
+		*/
+		
 		//finish
 		return 0;
 	}	
