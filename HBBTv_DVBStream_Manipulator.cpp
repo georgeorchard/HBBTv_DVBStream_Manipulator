@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <iterator>
 #include <regex>
+#include <array>
 
 
 
@@ -31,10 +32,10 @@ class TransportStream{
 		*/
 		TransportStream(std::string inputFile){
 			//set input as intermediate file
-			this->input = "inputcopy.ts"
+			this->input = "inputcopy.ts";
 			//Create the output file name
 			//get file name no .ts
-			std::string substring = originalString.substr(0, input.length() - 3);
+			std::string substring = input.substr(0, input.length() - 3);
 			// Get the current system time
 			auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
@@ -49,7 +50,7 @@ class TransportStream{
 			std::string formattedTime = ss.str();
 			//create the output string
 			std::string outputFile = substring + "_Processed_" + formattedTime + ".ts";
-			this->output = ouputFile;
+			this->output = outputFile;
 		}
 		
 		/**
@@ -81,15 +82,15 @@ class TransportStream{
 		void processMultiple(){
 			//process one file here using input and output
 			//Get the XML for the input file
-			getXML(input);
+			getXML();
 
 			//save the PAT of the XML of the input file in a seperate file
 			//save_pat()
 
 			//Get the process number and pmtPID of the chosen service
-			choices = serviceChoice()
-			processNumber = choices[0]
-			pmtPID = choices[1]
+			std::array<int,2> choices = serviceChoice();
+			int processNumber = choices[0];
+			int pmtPID = choices[1];
 
 			//process the file
 			processTSFile(processNumber, pmtPID);
@@ -125,15 +126,16 @@ class TransportStream{
 		*/
 		void processTSFile(int processNumber, int pmtPID) {
 			//Make the PMT XML for the process number 
-			savePMTByServiceID("pmtXML.xml", processNumber);
+			savePMTByServiceID("pmtXML.xml", std::to_string(processNumber));
 
 			//Replace SCTE-35 with DSMCC
 
 			//Get SCTE PID
+			int int_scte_pid = 0;
 			std::string sctePID = getSCTEPID();
 			if (!(sctePID == "")) {
 				//make int
-				int int_scte_pid = std::stoi(sctePID, nullptr, 16);
+				int_scte_pid = std::stoi(sctePID, nullptr, 16);
 			}
 			else {
 				std::cout << "SCTE PID not found, run on service with SCTE" << std::endl;
@@ -149,17 +151,17 @@ class TransportStream{
 			std::cin >> choice;
 			//if replaceing null
 			if (choice == 0) {
-				replace_scte35(input, "intermediate.ts", int_scte_pid, False)
+				replace_scte35(input, "intermediate.ts", int_scte_pid, false);
 			}
 			//if not replacing null
 			else {
-				replace_scte35(input, "intermediate.ts", int_scte_pid, True)
+				replace_scte35(input, "intermediate.ts", int_scte_pid, true);
 			}
 			//Replace SCTE elements with DSMCC ones
-			replaceSCTEElement("pmtXML.xml", scte_pid)
+			replaceSCTEElement("pmtXML.xml", sctePID);
 			//create new pmt
 			//replace old pmt with new one
-			replace_table("intermediate.ts", pmt_pid, "pmtXML.xml", output_file)
+			replace_table("intermediate.ts", pmtPID, "pmtXML.xml", output);
 				
 			//add that DSMCC element to another service
 			/**
@@ -199,8 +201,8 @@ class TransportStream{
 		*None
 		*/
 		void insert_table(std::string input_file ,int pid, std::string tablexml, int reprate_ms, std::string output_file) {
-			std::string command = 'tsp -I file ' + input_file + ' -P inject -p ' + (std::to_string(pid)) + tablexml + '=' + (std::to_string(reprate_ms)) + ' -O file ' + output_file;
-			system(command);
+			std::string command = "tsp - I file " + input_file + " - P inject - p " + (std::to_string(pid)) + tablexml + " = " + (std::to_string(reprate_ms)) + " - O file " + output_file;
+			system(command.c_str());
 		}
 
 		/**
@@ -213,9 +215,9 @@ class TransportStream{
 		*Returns:
 		*None
 		*/
-		void replace_table(std::string input_file, int pid, std::string tablexml, int reprate_ms, std::string output_file) {
-			std::string command = 'tsp -I file ' + input_file + ' -P inject -p ' + (std::to_string(pid)) + tablexml + '=' + (std::to_string(reprate_ms)) + ' -O file ' + output_file;
-			system(command);
+		void replace_table(std::string input_file, int pid, std::string tablexml, std::string output_file) {
+			std::string command = "tsp - I file " + input_file + " - P inject - p " + (std::to_string(pid)) + " - r " + tablexml + " - O file " + output_file;
+			system(command.c_str());
 		}
 
 
@@ -298,6 +300,7 @@ class TransportStream{
 		* DSMCC Packet
 		*/
 		std::vector<uint8_t> buildDSMCCPacket(const std::vector<uint8_t>& scte35_payload, int version_count, const std::vector<uint8_t>& packet, int cont_count) {
+			std::vector<uint8_t> valuesToAdd;
 			//DESCRIPTOR LIST SECTION - SPLICE INFORMATION - [A178-1r1_Dynamic-substitution-of-content  Table 3] - This information just goes before the SCTE35 data
 			//24 bits
 			//8 bits: DVB_data_length
@@ -311,7 +314,7 @@ class TransportStream{
 			dsm_descriptor.insert(dsm_descriptor.end(), scte35_payload.begin(), scte35_payload.end());
 
 			// Base64 encode the SCTE35 payload
-			std::vector<uint8_t> encoded_payload = base64_encode(dsm_descriptor);
+			std::string encoded_payload = base64_encode(dsm_descriptor);
 
 
 
@@ -341,7 +344,10 @@ class TransportStream{
 
 			//8 bits - Table ID
 			//x3D means that section contains stream descriptors - [ISO/IEC 13818-6:1998  Table 9-3]
-			dsmcc_packet += {0x00, 0x3D}; // Table ID
+			valuesToAdd = {0x00, 0x3D}; // Table ID
+			for (const auto& value : valuesToAdd) {
+				dsmcc_packet.push_back(value);
+			}
 
 			//8 bits
 			//1 bit: section_syntax_indicator
@@ -356,7 +362,10 @@ class TransportStream{
 
 			// TID Ext, do-it-now       ETSI TS 102 809 V1.2.1 / Section B32.  TID Ext = EventId 1 (14 bits), Bits 14/15 zero = 0x0001
 			//16 bits - table_id_extension(do - it - now)
-			dsmcc_packet += {0x00, 0x01}; // table_id_extension
+			valuesToAdd = {0x00, 0x01}; // table_id_extension
+			for (const auto& value : valuesToAdd) {
+				dsmcc_packet.push_back(value);
+			}
 
 			// Version field
 			//Version 1 (RR / VVVVV / C)   RR / 5 BIts of Version number / Current / Next indicator(always 1)   Version 1 = 11000011 = C3
@@ -372,7 +381,10 @@ class TransportStream{
 			//16 bits
 			//8 bits: section
 			//8 bits: last section
-			dsmcc_packet += {0x00, 0x00};
+			valuesToAdd = {0x00, 0x00};
+			for (const auto& value : valuesToAdd) {
+				dsmcc_packet.push_back(value);
+			}
 
 
 
@@ -388,13 +400,20 @@ class TransportStream{
 			//16 bits: eventID
 			//31 bits: reserved
 			//33 bits: eventNPT
-			dsmcc_packet += {0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0x00, 0x00, 0x00}; // Remaining descriptor
+			valuesToAdd = {0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0x00, 0x00, 0x00}; // Remaining descriptor
+			for (const auto& value : valuesToAdd) {
+				dsmcc_packet.push_back(value);
+			}
 
 			//THE PRIVATE DATA BYTES THE SCTE SECTION -  Add the SCTE35 payload into the DSMCC Packet
 			dsmcc_packet.insert(dsmcc_packet.end(), encoded_payload.begin(), encoded_payload.end());
 
 			//32 Bits - The CRC_32 Section as sectionSyntaxIndicator == 1 FINAL PART FROM [ISO/IEC 13818-6:1998  Table 9-2]
-			uint32_t dsmcc_crc = calculate_section_crc(&dsmcc_packet[5], dsmcc_len + 3 - 5);
+		
+
+			//uint32_t dsmcc_crc = calculate_section_crc(& dsmcc_packet[5], dsmcc_len + 3 - 5);
+			std::string section(dsmcc_packet.begin() + 5, dsmcc_packet.begin() + dsmcc_len + 4);
+			uint32_t dsmcc_crc = calculate_section_crc(section);
 			for (int i = 0; i < 4; ++i) {
 				dsmcc_packet.push_back((dsmcc_crc >> (8 * (3 - i))) & 0xFF);
 			}
@@ -405,6 +424,58 @@ class TransportStream{
 			}
 
 			return dsmcc_packet;
+		}
+
+
+		/**
+		A function that encodes a string to base 64
+
+		Parameters:
+		input (String): the input
+
+		Returns :
+		encoded(String): The output
+		*/
+		std::string base64_encode(const std::vector<uint8_t>& input) {
+			std::string base64_chars =
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+				"abcdefghijklmnopqrstuvwxyz"
+				"0123456789+/";
+			std::string encoded;
+			size_t i = 0;
+			uint32_t buf = 0;
+			int n = 0;
+
+			for (uint8_t c : input) {
+				buf |= static_cast<uint32_t>(c) << (16 - 8 * n);
+				n++;
+
+				while (n >= 3) {
+					encoded.push_back(base64_chars[(buf >> 18) & 0x3F]);
+					encoded.push_back(base64_chars[(buf >> 12) & 0x3F]);
+					encoded.push_back(base64_chars[(buf >> 6) & 0x3F]);
+					encoded.push_back(base64_chars[buf & 0x3F]);
+					buf <<= 24;
+					n -= 3;
+				}
+			}
+
+			if (n > 0) {
+				buf <<= 24 - 8 * n;
+				encoded.push_back(base64_chars[(buf >> 18) & 0x3F]);
+				encoded.push_back(base64_chars[(buf >> 12) & 0x3F]);
+
+				if (n == 1) {
+					encoded.push_back('=');
+					encoded.push_back('=');
+				}
+				else { // n == 2
+					encoded.push_back(base64_chars[(buf >> 6) & 0x3F]);
+					encoded.push_back('=');
+				}
+			}
+
+			return encoded;
 		}
 
 		/**
@@ -467,7 +538,7 @@ class TransportStream{
 					std::vector<uint8_t> scte35_payload(packet.begin() + 4 + adaptation_len, packet.begin() + 4 + scte35_length + 4 + adaptation_len);
 
 					if (scte35_length != 17) {
-						extractSCTEInformation(scte35_payload);
+						//extractSCTEInformation(scte35_payload);
 						std::vector<uint8_t> dsmcc_packet = buildDSMCCPacket(scte35_payload, version_count, packet, cont_count);
 						cont_count += 1;
 						cont_count &= 0x0F;
@@ -516,8 +587,8 @@ class TransportStream{
 		Null
 		*/
 		void getXML(){
-			std::string command = 'tsp -I file ' + input + ' -P psi -x "dataXML.xml" -d';
-			system(command);
+			std::string command = "tsp - I file " + input + " - P psi - x " + '"' + "dataXML.xml" +'"' + "- d";
+			system(command.c_str());
 		}
 
 		/**
@@ -724,7 +795,7 @@ class TransportStream{
 		Returns:
 		choices(String[]): Array containing serviceChoice, pmtChoice, serviceName
 		*/
-		std::vector<std::vector<std::string>> serviceChoice() {
+		std::array<int, 2> serviceChoice() {
 			std::ifstream file("patXML.xml");
 			std::ostringstream oss;
 			oss << file.rdbuf();
@@ -734,7 +805,7 @@ class TransportStream{
 			std::sregex_iterator pat_match(xml_content.begin(), xml_content.end(), pat_regex);
 			std::sregex_iterator pat_end;
 
-			std::vector<std::vector<std::string>> servicesList;
+			std::vector<std::vector<int>> servicesList;
 
 			for (; pat_match != pat_end; ++pat_match) {
 				std::string pat_info = pat_match->str();
@@ -743,10 +814,9 @@ class TransportStream{
 				std::sregex_iterator service_end;
 
 				for (; service_match != service_end; ++service_match) {
-					std::vector<std::string> serviceDetails;
-					serviceDetails.push_back(service_match->str(1));
-					serviceDetails.push_back(service_match->str(2));
-					// Call get_service_name() and get service name here
+					std::vector<int> serviceDetails;
+					serviceDetails.push_back(std::stoi(service_match->str(1)));
+					serviceDetails.push_back(std::stoi(service_match->str(2)));
 					servicesList.push_back(serviceDetails);
 				}
 			}
@@ -761,11 +831,12 @@ class TransportStream{
 			std::cin >> choice;
 
 			if (choice >= 0 && static_cast<size_t>(choice) < servicesList.size()) {
-				return { servicesList[choice] };
+				return { servicesList[choice][0], servicesList[choice][1] };
 			}
 
-			return {};
+			return { -1, -1 }; // Return invalid values if choice is out of bounds
 		}
+
 		
 		/**Functions NEEDED(need xml parser)
 		* addDSMCCToService
@@ -789,7 +860,15 @@ class TransportStream{
 		//get the file name from the command line
 		std::string input = argv[0];
 		//Add .ts to end of file name if not there
-		if(!(endsWith(input, ".ts"))){
+		if (input.length() >= 3 &&
+			input.substr(input.length() - 3) == ".ts") {
+			// The string ends with '.ts'
+		
+			// Do nothing
+			input = input;
+		}
+		else {
+			//add .ts
 			input = input + ".ts";
 		}
 		
@@ -805,9 +884,8 @@ class TransportStream{
 		//create the transport stream object
 		TransportStream ts(input);
 		//call the process multiple
-		ts.processMultiple()
+		//ts.processMultiple()
 		//finish
 		return 0;
 	}	
 		
-}
