@@ -910,11 +910,11 @@ class TransportStream{
 		//remove files
 		std::remove("intermediate.ts");
 		std::remove("inputcopy.ts");
-		/**
+		
 		std::remove("dataXML.xml");
 		std::remove("patXML.xml");
 		std::remove("pmtXML.xml");
-		*/
+		
 		
 		//finish
 		return 0;
