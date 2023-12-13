@@ -163,11 +163,15 @@ class TransportStream{
 			else {
 				replace_scte35(input, "intermediate.ts", int_scte_pid, true);
 			}
+		
 			//Replace SCTE elements with DSMCC ones
 			replaceSCTEElement("pmtXML.xml", sctePID);
+		
 			//create new pmt
 			//replace old pmt with new one
 			replace_table("intermediate.ts", pmtPID, "pmtXML.xml", output);
+			
+			
 				
 			//add that DSMCC element to another service
 			/**
@@ -195,21 +199,6 @@ class TransportStream{
 
 		//TABLE MANIPULATION FUNCTIONS
 		
-		/**
-		* Function to insert a table (AIT) to the TS at a given insertRate
-		* Parameters:
-		* input_file(String): The input file
-		* pid(int): The PID to have the table on
-		* tablexml (str): The table XML to inject.
-		* reprate_ms (int): The repetition rate in milliseconds.
-		* output_file (str): The output file.
-		*Returns:
-		*None
-		*/
-		void insert_table(std::string input_file ,int pid, std::string tablexml, int reprate_ms, std::string output_file) {
-			std::string command = "tsp -I file " + input_file + " -P inject -p " + (std::to_string(pid)) + tablexml + " = " + (std::to_string(reprate_ms)) + " -O file " + output_file + " >NUL";
-			system(command.c_str());
-		}
 
 		/**
 		* Function to replace a table 
@@ -222,7 +211,8 @@ class TransportStream{
 		*None
 		*/
 		void replace_table(std::string input_file, int pid, std::string tablexml, std::string output_file) {
-			std::string command = "tsp -I file " + input_file + " -P inject -p " + (std::to_string(pid)) + " -r " + tablexml + " -O file " + output_file+ " >NUL";
+			std::string command = "tsp -I file \"" + input_file + "\" -P inject -p " + (std::to_string(pid)) + " -r " + tablexml + " -O file \"" + output_file+ "\"";
+			//std::string command = "tsp -I file \"" + input_file + "\" -P inject -p " + intToHexString(pid) + " -r " + tablexml + " -O file \"" + output_file+ "\"";
 			system(command.c_str());
 		}
 
@@ -530,36 +520,32 @@ class TransportStream{
 				input_stream.read(reinterpret_cast<char*>(&packet[1]), 187); // Read the entire packet
 
 				// Extract packet PID
-				int pid = (packet[1] << 8) | packet[2];
-				pid &= 0x1FFF;
-				int cc = packet[3] & 0xFF;
+				int pid = ((packet[1] & 0x1F) << 8) | packet[2];
+				int cc = packet[3] & 0x0F;
 
 				// Check if the packet contains SCTE35 payload
 				if (pid == scte35_pid && (packet[3] & 0x10)) {
 					// Extract SCTE35 payload
-					if (packet[3] & 0x30 == 0x30) {
-						adaptation_len = packet[4] + 1;
-					}
-					int scte35_length = packet[7 + adaptation_len];
+					int adaptation_len = (packet[3] & 0x30) == 0x30 ? packet[4] + 1 : 0;
+					int scte35_length = packet[adaptation_len + 7];
+
 					std::vector<uint8_t> scte35_payload(packet.begin() + 4 + adaptation_len, packet.begin() + 4 + scte35_length + 4 + adaptation_len);
 
 					if (scte35_length != 17) {
-						//extractSCTEInformation(scte35_payload);
+						// Payload is not null
+						// Extract SCTE information and process accordingly
 						std::vector<uint8_t> dsmcc_packet = buildDSMCCPacket(scte35_payload, version_count, packet, cont_count);
 						cont_count += 1;
 						cont_count &= 0x0F;
 						events_replaced += 1;
-
 						output_stream.write(reinterpret_cast<char*>(dsmcc_packet.data()), dsmcc_packet.size());
 						version_count += 1;
-					}
-					//if current SCTE packet is null
-					else {
+					} else {
+						// Payload is null
 						if (!replaceNull) {
 							events_notreplaced += 1;
 							sendStuffedPacket(output_stream);
-						}
-						else {
+						} else {
 							std::vector<uint8_t> dsmcc_packet = buildDSMCCPacket(scte35_payload, version_count, packet, cont_count);
 							cont_count += 1;
 							cont_count &= 0x0F;
@@ -567,8 +553,7 @@ class TransportStream{
 							output_stream.write(reinterpret_cast<char*>(dsmcc_packet.data()), dsmcc_packet.size());
 						}
 					}
-				}
-				else {
+				} else {
 					output_stream.write(reinterpret_cast<char*>(packet.data()), packet.size());
 				}
 				packetcount += 1;
